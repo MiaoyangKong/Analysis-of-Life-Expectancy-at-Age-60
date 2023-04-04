@@ -1,0 +1,363 @@
+---
+title: "final project"
+output: html_document
+date: "2022-11-21"
+editor_options: 
+  chunk_output_type: console
+---
+## Analysis of Life Expectancy at Age 60 ##
+
+Group Name: wallaby
+
+Group members: Miaoyang Kong(mkong22@wisc.edu), Jiaqi Guo(jguo288@wisc.edu), Yutong Wei(ywei88@wisc.edu)
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, fig.height = 3)
+
+library(readr)
+library(kableExtra)
+library(car)
+library(tidyverse)
+library(lubridate)
+library(scales)
+```
+
+
+## Introduction
+
+We are interested in life expectancy because we read a piece of news from THE NEW YORK TIME, which is talking about U.S. Life Expectancy Falls Again in ‘Historic’ Setback[website](https://www.nytimes.com/2022/08/31/health/life-expectancy-covid-pandemic.html). In recent years, there has been an increasing concern about the length of life span. In addition, many countries have seen an aging population. We hope to do research about life expectancy focusing on finding the effect of 6 explanatory variables on the life expectancy. 
+
+## Main Question
+
+What variables have significant effect on life expectancy at age 60?
+
+
+## Data Section
+
+**Source Data**
+
+The data of life expectancy is collected by World Health Organization[website](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/life-expectancy-at-age-60-(years)). Since the statistics for life expectancy at 60 is predicted for the years 2000, 2010, 2015, and 2019, we will concentrate on these four years. Life expectancy at age 60 reflects the overall mortality level of a population over 60 years. It summarizes the mortality pattern that prevails across all age groups above 60 years. We therefore focused on the impact of mortality from various diseases on life expectancy and wanted to investigate which disease has a greater impact on life expectancy through disease mortality. Because we wish to rule out the impact of the newborn mortality rate on life expectancy, we chose the data for life expectancy at age 60. Furthermore, we are more focused on how factors like money and education affect life expectancy.
+
+For predictor factors, we choose the number of death caused by tuberculosis[website](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/number-of-deaths-due-to-tuberculosis-excluding-hiv), the number of death casued by Noncommunicable diseases(NCD)[website](https://www.who.int/data/gho/data/indicators/indicator-details/GHO/gho-ghe-ncd-deaths-in-thousands), and undernourishment to figure out how specific kind of disease or unhealthy condition may affect the life expectancy[website](https://data.worldbank.org/indicator/SN.ITK.DEFC.ZS?view=chart); we choose suicide rate to figure out how suicide may affect the life expectancy[website](https://www.who.int/data/gho/data/themes/mental-health/suicide-rates); we choose the enrollment rate of tertiary school to figure out how education level may affect the life expectancy[website](https://data.worldbank.org/indicator/SE.TER.ENRR?end=2019&name_desc=false&start=2000); we choose the per adult national income to figure out how the economic level may affect the life expectancy[website](https://wid.world/data/). We also select the observations of the predictor factors from the years 2000, 2010, 2015, and 2019.
+
+```{r, echo = FALSE}
+life_expectancy_variables = tibble(
+  Name = c("life_expectancy (response)", "tuberculousis", "NCD", "income", "suiside", "education", "undernourishment"),
+  Description = c("Life expectancy at age 60 (years)",
+                  "Estimated number of deaths due to tuberculosis, excluding HIV",
+                  "Number of deaths attributed to non-communicable diseases (in thousands)",
+                  "Per adult national income",
+                  "Age-standardized mortality rate (per 100 000 population)",
+                  "School enrollment, tertiary (% gross)",
+                  "Prevalence of undernourishment (% of population)"))
+
+life_expectancy_variables %>% 
+  kable(caption = "Key Variables from the Airport Wait Times of Boston international Airport Data") %>% 
+  kable_styling(position = "left", full_width = FALSE,
+                bootstrap_options = c("striped"))
+```
+
+We omit those observations because certain countries' data on undernourishment and education are missing.
+
+```{r}
+total <- read_csv("merge.csv")
+total[total < 0] <-NA
+total=total %>% na.omit()
+
+total %>%
+  head(10)
+print(total)
+```
+
+After observing the non-linearity issue in the origin exploratory plot, we decide to apply log transformation to Number of death due to tuberculosis, excluding HIV`, Total NCD Death(inthousands), Per adult national income, Age-standarized suicide rates (per 100000 population), Prevalence of undernourishment (% of population). Additionally, we applied square root transformation to the variable of School enrollment, tertiary (% gross). 
+
+This is exploratory plot of our dataset. We observe a positive relationship between life expectancy and income, between life expectancy and schooling. In addition, We observe a negative relationship between life expectancy and NCD. 
+
+```{r,fig.width=10,fig.height=10,fig.align='center'}
+total_transform = log(total[-(1:2)])
+total_transform$`Life expectancy` = 10^(total_transform$`Life expectancy`)
+total_transform$`School enrollment, tertiary (% gross)` = sqrt(10^(total_transform$`School enrollment, tertiary (% gross)`))
+pairs(total_transform)
+```
+
+We produces a matrix of scatter plots for visualizing the correlation between variables. We are able to read the scatterplots of each pair visualized in right side of the plot and Pearson correlation value and significance display on the left side.
+
+```{r,fig.width=10,fig.height=10,fig.align='center'}
+library(GGally)
+
+ggpairs(total_transform[is.finite(rowSums(total_transform)),], lower = list(continuous = "cor", combo = "box_no_facet", discrete = "facetbar",na="na"),
+    upper = list(continuous = wrap("smooth", alpha = 0.3, size=0.2)))
+```
+
+
+## Method Section
+
+We select multiple linear regression model, and include interaction effects. Moreover, we check the VIF value to facilitate us discover the variables which have significant effect on life expectancy.
+
+**Multiple Linear Regression Model**
+
+Since we want to find out the relationship between life expectancy (the dependent variable or response) and seven factors we are interested in (the independent variables or predictors),that are tuberculousis,NCD,income,suicide,education, and undernourishment, we select the multiple linear regression model.  
+  
+```{r}
+#Define the response and predictors:
+life_expectancy =total$`Life expectancy`
+tuberculousis =total$`Number of death due to tuberculosis, excluding HIV`
+NCD = total$`Total NCD Death(inthousands)`
+income = total$`Per adult national income`
+suicide = total$`Age-standarized suicide rates (per 100000 population)`
+education=total$`School enrollment, tertiary (% gross)`
+undernourishment = total$`Prevalence of undernourishment (% of population)`
+```
+
+We transform the independent variables using 'log' and 'sqrt' to meet linearity assumption.
+
+```{r}
+log_tuberculousis=log10(tuberculousis)
+log_NCD = log(NCD)
+log_income=log(income)
+log_suicide=log(suicide)
+sqrt_education=sqrt(education)
+log_undernourishment=log(undernourishment)
+```
+
+To accommodate the transformed independent variable, we create a new dataframe. We remove the missing data in the new dataframe because there is one negative observation in the income column and this observation becomes undefined after the income is "logged."
+
+```{r}
+new_data=data.frame(life_expectancy,log_tuberculousis,log_NCD,log_income,log_suicide,sqrt_education,log_undernourishment)
+new_data[is.na(new_data) | new_data == "-Inf"] <- NA
+new_data=new_data %>% na.omit()
+new_data %>%
+  head(10)
+```
+
+```{r}
+lmmodel = lm(life_expectancy ~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment, data = new_data)
+summary(lmmodel)
+```
+
+**Interaction Effect**
+
+To detect if there are interaction effects between pairs of variables that we are interested in, We choose to use AIC in a Stepwise Algorithm, which is an automated method that returns back the optimal set of model.
+
+```{r}
+library(MASS)
+lm1 = lm(life_expectancy ~1, data = new_data)
+lm2 = lm(life_expectancy ~ (.)^2, data = new_data)
+lm.both = stepAIC(lm1, direction="both", scope=list(upper=lm2,lower=lm1))
+```
+
+Further, we draw the interaction plots to visualize the model with the minimum value of AIC in order to prove the model in stepAIC.
+
+```{r}
+library(interactions)
+
+lm_refit1=lm(life_expectancy ~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+sqrt_education:log_undernourishment, data = new_data)
+interact_plot(lm_refit1, pred=sqrt_education, modx=log_undernourishment)
+
+lm_refit2=lm(life_expectancy ~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_income:log_tuberculousis, data = new_data)
+interact_plot(lm_refit2, pred=log_income, modx=log_tuberculousis)
+
+lm_refit3=lm(life_expectancy ~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_suicide:log_undernourishment, data = new_data)
+interact_plot(lm_refit3, pred=log_suicide, modx=log_undernourishment)
+
+lm_refit4=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+log_tuberculousis:log_suicide, data = new_data)
+interact_plot(lm_refit4, pred=log_tuberculousis, modx=log_suicide)
+
+lm_refit5=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+log_tuberculousis:log_income, data = new_data)
+interact_plot(lm_refit5, pred=log_tuberculousis, modx=log_income)
+
+lm_refit6=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+log_NCD:log_tuberculousis, data = new_data)
+interact_plot(lm_refit6, pred=log_NCD, modx=log_tuberculousis)
+
+lm_refit7=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+log_undernourishment:log_income, data = new_data)
+interact_plot(lm_refit7, pred=log_undernourishment, modx=log_income)
+
+lm_refit8=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+log_suicide:log_income, data = new_data)
+interact_plot(lm_refit8, pred=log_suicide, modx=log_income)
+
+
+lm_refit9=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+sqrt_education:log_income, data = new_data)
+interact_plot(lm_refit9, pred=sqrt_education, modx=log_income)
+
+lm_refit10=lm(life_expectancy~ log_tuberculousis + log_NCD + log_income + log_suicide + sqrt_education + log_undernourishment+sqrt_education:log_suicide, data = new_data)
+interact_plot(lm_refit10, pred=sqrt_education, modx=log_suicide)
+```
+
+We observe that the lines are not parallel in the sqrt(education) and log(undernourishment), log(undernourishment) and log(suicide), log(NCD) and log(suicide), log(tuberculousis) and log(suicide), log(tuberculousis) and log(income),  log(NCD) and log(tuberculousis), log(undernourishment) and log(income), log(suicide) and log(income), sqrt(education) and log(income), sqrt(education) and log(suicide) interaction plots. Therefore, we include these ten interactions into our final multiple linear regression model. 
+
+
+**VIF Values**
+
+We use VIF values to measures the strength of the correlation between the independent variables in regression analysis in order to avoid the occurrence of multicollinearity which inflates the variance and type II error. 
+
+```{r}
+f_lm1=lm(life_expectancy ~ log_NCD + sqrt_education + log_undernourishment + 
+    log_suicide + log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + log_NCD:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_NCD:log_tuberculousis + log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm1)
+
+f_lm2=lm(life_expectancy ~ log_NCD + sqrt_education + log_undernourishment + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + log_NCD:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_NCD:log_tuberculousis + log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm2)
+
+f_lm3=lm(life_expectancy ~ log_NCD + sqrt_education + log_undernourishment + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + log_NCD:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_NCD:log_tuberculousis + log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm3)
+
+f_lm4=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + log_NCD:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_NCD:log_tuberculousis + log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm4)
+
+f_lm5=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_NCD:log_tuberculousis + log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm5)
+
+f_lm6=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_undernourishment:log_income + 
+    log_suicide:log_income + sqrt_education:log_suicide, data = new_data)  
+
+vif(f_lm6)
+
+f_lm7=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_undernourishment:log_income + 
+    log_suicide:log_income , data = new_data)  
+
+vif(f_lm7)
+
+f_lm8=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_suicide + log_tuberculousis:log_income + 
+    log_suicide:log_income , data = new_data)  
+
+vif(f_lm8)
+
+f_lm9=lm(life_expectancy ~ log_NCD + sqrt_education  + 
+     log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_income + 
+    log_suicide:log_income , data = new_data)  
+
+vif(f_lm9)
+
+```
+
+We only keep variables and interaction terms which have vif values below 10 in our final linear regression model.
+
+```{r}
+final_lm = lm(life_expectancy ~ log_NCD + sqrt_education  + 
+    log_income + sqrt_education:log_undernourishment + 
+    log_undernourishment:log_suicide + 
+    log_tuberculousis:log_income + 
+    log_suicide:log_income , data = new_data)  
+summary(final_lm)
+```
+
+
+## Discussion Section
+
+**(1) Analysis of coefficients**
+
+From the summary table, we can analyse the coefficients which we are interested in:  
+
+48.3% is the expected decrease in life expectancy if we were to increase the log of the number of NCD Death by one unit, keeping everything else constant. It can also be interpreted as the effect of the log of the number of NCD Death on life expectancy, controlling for the rest of the 6 variables in the model.  
+  
+0.67% is the expected increase in life expectancy if we were to increase the log of tertiary school enrollment rate by one unit, keeping everything else constant. It can also be interpreted as the effect of tertiary school enrollment rate on life expectancy, controlling for the rest of the 6 variables in the model.   
+
+**(2) Interaction Effects**
+
+The coefficient of square root of School enrollment, tertiary (% gross) increases by 0.084678 for every unit increase on the log of prevalence of undernourishment 
+
+The coefficient of log of prevalence of undernourishment decreases by 0.286667   for every unit increase on the log of Age-standardized mortality rate (per 100 000 population) .
+
+The coefficient of log of the number of death due to tuberculosis (excluding HIV) decreases by 0.005276  for every unit increase on the log of per adult national income.
+
+The coefficient of log of Age-standardized mortality rate (per 100 000 population) increases by 0.035776 for every unit increase on the log of per adult national income.
+
+**(3) VIF Values**
+By testing the VIF, we only keep the log(NCD), sqrt(education), log(income) and interaction terms of sqrt(education) and log(undernourishment),log(undernourishment) and log(suicide),log(tuberculousis) and log(income),log(suicide) and log(income) which have VIF values below 10. It means that these variables and interaction terms has no highly correlation between each other.
+ 
+**(4) P-values**
+
+The P-values of the variables of log of NCD, square root of education, the interaction term between the square root of education and the log of undernourishment,  the interaction term between the log of undernourishment and the log of suicide, the interaction term between the log of tuberculousis and the log of income, and the interaction term between the log of suicide and the log of income are less than 0.05, which implies that these terms have significant effects on the response variable. 
+    
+**(5) Limitations**
+
+One limitation is the problem of missing data in variable education	(School enrollment, tertiary (% gross)) and negative values in variable income (Per adult national income). The reason these missing or negative data is a problem is that after we apply non-linear transformations--log() to income and sqrt() to education, there will be a large amount of NaN and -Inf in the dataset.  
+
+To get rid of this problem, we tried to approximate missing data in education by calculating a function for education, that is, finding the interpolation for missing data. The idea is countries with missing data in the four years we focus on still have available data in other years. If we could find a general trend about how education value change in different years, we could calculate an estimated value for missing data.However, by drawing the plot of known education values of twenty randomly selected countries, and repeating the process for three times, we failed to find a function for the interpolation. 
+
+Below are three plots of known education values:
+
+```{r}
+library(tidyverse)
+library(readxl)
+
+school = read_xls("schooling.xls",sheet=2)
+
+school %>% pivot_longer(`1960`:last_col(),names_to="year",values_to="val") %>% 
+  group_by(`Country Name`) %>% 
+  summarise(pre2000 = sum((year<2000)*(val*0+1),na.rm=T),
+            btw2000.2010 = sum((year>2000)*(year<2010)*(val*0+1),na.rm=T),
+            btw2010.2015 = sum((year>2010)*(year<2015)*(val*0+1),na.rm=T),
+            post2015 = sum((year>2015)*(val*0+1),na.rm=T)) -> school.ys
+
+par(mfrow = c(3,1))
+
+school %>% 
+  pivot_longer(`1960`:last_col(),names_to="year",values_to="val") %>% 
+  filter(`Country Name` %in% sample(unique(`Country Name`),20)) %>%
+  ggplot(aes(x=as.numeric(year),y=val,color=`Country Name`))+geom_point()+geom_line()
+
+
+school %>% 
+  pivot_longer(`1960`:last_col(),names_to="year",values_to="val") %>% 
+  filter(`Country Name` %in% sample(unique(`Country Name`),20)) %>%
+  ggplot(aes(x=as.numeric(year),y=val,color=`Country Name`))+geom_point()+geom_line()
+
+
+school %>% 
+  pivot_longer(`1960`:last_col(),names_to="year",values_to="val") %>% 
+  filter(`Country Name` %in% sample(unique(`Country Name`),20)) %>%
+  ggplot(aes(x=as.numeric(year),y=val,color=`Country Name`))+geom_point()+geom_line()
+```      
+  
+We could see that there is not a fixed trend of these data. Some of the lines are linear, some are curves, some are not even monotone(i.e. The school enrollment value of that country may increase first, then decrease, and increase again). Without a good function, applying approximation for missing data may cause a bigger bias. With this consideration, we chose to delete the year with missing education value from that country.  
+
+In addition, since the log of a negative value is undefined, which would cause a problem in the linear regression model, we chose to delete the year with negative income value from that country.
+
+
+## Conclusion Section##
+
+We collected the life expectancy data and seven explanatory variables data we are interested in. By constructing multiple linear regression model and anova model, we find that log(NCD), sqrt(education), log(income) and interaction terms of sqrt(education) and log(undernourishment),log(undernourishment) and log(suicide),log(tuberculousis) and log(income),log(suicide) and log(income) have significant effect on life expectancy at Age 60 (response variable). 
+
